@@ -12,6 +12,11 @@ type A struct {
 	Siblings int
 	Spouse   bool
 	Money    float64
+	Map      map[string]interface{}
+	MapPk    map[*string]interface{}
+	MapSk    map[string]*int
+	MapI     map[interface{}]interface{}
+	MapPtr   *map[interface{}]interface{}
 }
 
 type NoTimeA struct {
