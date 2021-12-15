@@ -1,0 +1,64 @@
+(*goserbench.A)(0xc000240b60)({
+  Name: (string) (len=16) "581a8b9525e20fda",
+  BirthDay: (time.Time) 2021-12-13 13:12:33.869023 +0800 CST m=+0.003155917,
+  Phone: (string) (len=10) "68927f2b2f",
+  Siblings: (int) 3,
+  Spouse: (bool) false,
+  Money: (float64) 0.6967191657466347,
+  Map: (map[string]interface {}) (len=1) {
+  (string) (len=10) "3578db0fa5": (int32) 170625356
+  },
+  MapSk: (map[string]*int) (len=1) {
+  (string) (len=10) "29f7fd928d": (*int)(0xc00019e930)(3)
+  },
+  MapPtrPk: (*map[string]interface {})(0xc00019a960)((len=4) {
+  (string) (len=2) "c6": (*string)(0xc000232e60)((len=10) "210fc7bb81"),
+  (string) (len=2) "af": (string) (len=5) "39ac4",
+  (string) (len=2) "a2": (int) 0,
+  (string) (len=2) "f1": (time.Time) 2021-12-13 13:12:33.869022 +0800 CST m=+0.003154751
+  }),
+  Slice: ([]int) (len=2 cap=2) {
+  (int) 4990765271833742716,
+  (int) 5018949295715050020
+  },
+  SliceS: ([]string) (len=2 cap=2) {
+  (string) (len=5) "43f19",
+  (string) (len=5) "dee47"
+  },
+  SlicePtr: ([]*string) (len=2 cap=2) {
+  (*string)(0xc000232e60)((len=10) "210fc7bb81"),
+  (*string)(0xc000232e70)((len=5) "39ac4")
+  },
+  SliceI: ([]interface {}) (len=8 cap=8) {
+  (string) (len=3) "591",
+  (int) 2740376916591569721,
+  (int32) 1920627189,
+  (int64) 898860202204764712,
+  (time.Time) 2021-12-13 13:12:33.869025 +0800 CST m=+0.003157501,
+  (*string)(0xc000232e60)((len=10) "210fc7bb81"),
+  (*int)(0xc00019e930)(3),
+  (*map[string]interface {})(0xc00019a960)(<already shown>)
+  },
+  Array: ([2]int) (len=2 cap=2) {
+  (int) 9010467728050264449,
+  (int) 685213522303989579
+  },
+  ArrayS: ([2]string) (len=2 cap=2) {
+  (string) (len=2) "c8",
+  (string) (len=2) "fa"
+  },
+  ArrayPtr: ([2]*string) (len=2 cap=2) {
+  (*string)(0xc000232e60)((len=10) "210fc7bb81"),
+  (*string)(0xc000232e70)((len=5) "39ac4")
+  },
+  ArrayI: ([8]interface {}) (len=8 cap=8) {
+  (string) (len=3) "67a",
+  (int) 8603989663476771718,
+  (int32) 1593108510,
+  (int64) 7388428680384065704,
+  (time.Time) 2021-12-13 13:12:33.869025 +0800 CST m=+0.003158042,
+  (*string)(0xc000232e60)((len=10) "210fc7bb81"),
+  (*int)(0xc00019e930)(3),
+  (*map[string]interface {})(0xc00019a960)(<already shown>)
+  }
+})

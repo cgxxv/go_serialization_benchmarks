@@ -1,21 +1,205 @@
 package goserbench
 
 import (
+	"bytes"
+	"context"
+	"crypto/sha1"
+	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/go-redis/redis/v8"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/niubaoshu/gotiny"
+	"github.com/stretchr/testify/assert"
 )
+
+var (
+	ctx       = context.TODO()
+	fakeRedis *miniredis.Miniredis
+	mockRedis *redis.Client
+)
+
+func init() {
+	fakeRedis, err := miniredis.Run()
+	if err != nil {
+		panic(err)
+	}
+	mockRedis = redis.NewClient(&redis.Options{Addr: fakeRedis.Addr()})
+}
+
+func demo(x interface{}) {
+	if rt := reflect.TypeOf(x); rt.Kind() == reflect.Ptr {
+		println("-------------")
+		spew.Dump(x, rt.Elem(), reflect.ValueOf(x))
+	} else {
+		println("============")
+		spew.Dump(&x, rt, reflect.ValueOf(&x).Elem())
+	}
+}
+
+func TestRedis(t *testing.T) {
+	s := mockRedis
+	pipe := s.Pipeline()
+	for i := 0; i < 5; i++ {
+		pipe.SetEX(ctx, "key"+strconv.Itoa(i), "hoge"+strconv.Itoa(i), 10*time.Second)
+	}
+	_, err := pipe.Exec(ctx)
+	assert.Nil(t, nil)
+
+	// 普通にループ
+	result := map[string]string{}
+	for i := 0; i < 5; i++ {
+		key := "key" + strconv.Itoa(i)
+		res, _ := s.Get(ctx, key).Result()
+		result[key] = res
+	}
+	spew.Dump(result)
+
+	// Pipelineを使ってループ
+	m := map[string]*redis.StringCmd{}
+	pipe2 := s.Pipeline()
+	for i := 0; i < 5; i++ {
+		m["key"+strconv.Itoa(i)] = pipe2.Get(ctx, "key"+strconv.Itoa(i))
+	}
+	_, err = pipe2.Exec(ctx)
+	assert.Nil(t, err)
+
+	result2 := map[string]string{}
+	for k, v := range m {
+		res, _ := v.Result()
+		result2[k] = res
+	}
+	spew.Dump(result2)
+	assert.Equal(t, result, result2)
+}
+
+func Test_SliceElementValue(t *testing.T) {
+	changeSliceElementValue := func(b []int) {
+		for i := 0; i < len(b); i++ {
+			b[i] += 10
+		}
+	}
+	var b = []int{1, 2, 3}
+	changeSliceElementValue(b)
+	assert.Equal(t, b[0], 11)
+	assert.Equal(t, b[1], 12)
+	assert.Equal(t, b[2], 13)
+}
+
+// func Test_SimpleJsonUnmarshal(t *testing.T) {
+// 	simple(t)
+// }
+
+// func Test_SimpleJsonIterUnmarshal(t *testing.T) {
+// 	simple(t)
+// }
+
+func simple(t *testing.T) {
+	a := map[interface{}]interface{}{
+		"A": map[interface{}]interface{}{
+			"B": 123,
+		},
+	}
+	b, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("%s\n", b)
+	v := map[string]interface{}{}
+	err = json.Unmarshal(b, &v)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 var (
 	validate     = os.Getenv("VALIDATE")
 	jsoniterFast = jsoniter.ConfigFastest
 )
+
+func Test_GotinyUnmarshal(t *testing.T) {
+	testUnmarshal(t, NewGotinySerializer(A{}))
+}
+
+// func Test_GotinyPtrUnmarshal(t *testing.T) {
+// 	testUnmarshal(t, NewGotinySerializer(new(A)))
+// }
+
+// func Test_GobUnmarshal(t *testing.T) {
+// 	testUnmarshal(t, NewGobSerializer())
+// }
+
+// func Test_JsonIterUnmarshal(t *testing.T) {
+// 	testUnmarshal(t, &JsonIterSerializer{})
+// }
+
+// func Test_JsonUnmarshal(t *testing.T) {
+// 	testUnmarshal(t, &JsonSerializer{})
+// }
+
+func testUnmarshal(t *testing.T, s Serializer) {
+	data := generate()
+	ser := make([][]byte, len(data))
+	var serialSize int
+	for i, d := range data {
+		o, err := s.Marshal(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t := make([]byte, len(o))
+		serialSize += copy(t, o)
+		ser[i] = t
+	}
+
+	for n := 0; n < len(ser); n++ {
+		o := &A{}
+		err := s.Unmarshal(ser[n], o)
+		if err != nil {
+			t.Fatalf("unmarshal error %s for %#x / %q", err, ser[n], ser[n])
+		}
+		// Validate unmarshalled data.
+		if validate != "" {
+			i := data[n]
+			correct := o.Name == i.Name &&
+				o.Phone == i.Phone &&
+				o.Siblings == i.Siblings &&
+				o.Spouse == i.Spouse &&
+				o.Money == i.Money &&
+				o.BirthDay.Equal(i.BirthDay) &&
+				reflect.DeepEqual(o.Map, i.Map) &&
+				// reflect.DeepEqual(o.MapPk, i.MapPk) &&
+				reflect.DeepEqual(o.MapSk, i.MapSk) &&
+				// reflect.DeepEqual(o.MapI, i.MapI) &&
+				// reflect.DeepEqual(o.MapPtr, i.MapPtr) &&
+				reflect.DeepEqual(o.Slice, i.Slice) &&
+				reflect.DeepEqual(o.SliceS, i.SliceS) &&
+				reflect.DeepEqual(o.SliceI, i.SliceI) &&
+				reflect.DeepEqual(o.SlicePtr, i.SlicePtr) &&
+				reflect.DeepEqual(o.Array, i.Array) &&
+				reflect.DeepEqual(o.ArrayS, i.ArrayS) &&
+				reflect.DeepEqual(o.ArrayI, i.ArrayI) &&
+				reflect.DeepEqual(o.ArrayPtr, i.ArrayPtr) //&& cmpTags(o.Tags, i.Tags) && cmpAliases(o.Aliases, i.Aliases)
+			if !correct {
+				b1, _ := json.Marshal(i)
+				b2, _ := json.Marshal(o)
+				if v1, v2 := sha1.Sum(b1), sha1.Sum(b2); !reflect.DeepEqual(v1, v2) {
+					fmt.Printf("sha1 value %x != %x\n", v1, v2)
+				}
+
+				t.Fatalf("unmarshaled object differed:\n%d\n%s\n%v", n, spew.Sdump(i), spew.Sdump(o))
+			}
+		}
+	}
+}
 
 func randString(l int) string {
 	buf := make([]byte, l)
@@ -25,15 +209,19 @@ func randString(l int) string {
 	return fmt.Sprintf("%x", buf)[:l]
 }
 
+const datalength = 1000
+
 func generate() []*A {
-	a := make([]*A, 0, 1000)
-	for i := 0; i < 1000; i++ {
+	a := make([]*A, 0, datalength)
+	for i := 0; i < datalength; i++ {
 		var (
-			pk  string = randString(10)
-			pv  int    = rand.Intn(5)
-			ik  string = randString(5)
-			iv  int    = rand.Intn(10)
-			ptr        = map[interface{}]interface{}{rand.Int(): randString(5), &pk: &pv, &ik: &iv}
+			pk string = randString(10)
+			pv int    = rand.Intn(5)
+			ik string = randString(5)
+			iv int    = rand.Intn(10)
+			// ptr          = map[interface{}]interface{}{rand.Int(): randString(5), &pk: &pv, &ik: &iv}
+
+			ptrpk = map[string]interface{}{randString(2): &pk, randString(2): ik, randString(2): iv}
 		)
 		a = append(a, &A{
 			Name:     randString(16),
@@ -43,10 +231,20 @@ func generate() []*A {
 			Spouse:   rand.Intn(2) == 1,
 			Money:    rand.Float64(),
 			Map:      map[string]interface{}{randString(10): rand.Int31()},
-			MapPk:    map[*string]interface{}{&pk: rand.Int()},
-			MapSk:    map[string]*int{randString(10): &pv},
-			MapI:     map[interface{}]interface{}{rand.Int63(): rand.Int63(), &ik: randString(5), rand.Int(): iv},
-			MapPtr:   &ptr,
+			// MapPk:    map[*string]interface{}{&pk: rand.Int()},
+			MapSk: map[string]*int{randString(10): &pv},
+			// MapI:   map[interface{}]interface{}{rand.Int63(): rand.Int63(), &ik: randString(5), rand.Int(): iv},
+			// MapPtr: &ptr,
+			MapPtrPk: &ptrpk,
+
+			Slice:    []int{rand.Int(), rand.Int()},
+			SliceS:   []string{randString(5), randString(5)},
+			SlicePtr: []*string{&pk, &ik},
+			SliceI:   []interface{}{randString(3), rand.Int(), rand.Int31(), rand.Int63(), &pk, &pv, &ptrpk},
+			Array:    [2]int{rand.Int(), rand.Int()},
+			ArrayS:   [2]string{randString(2), randString(2)},
+			ArrayPtr: [2]*string{&pk, &ik},
+			ArrayI:   [8]interface{}{randString(3), rand.Int(), rand.Int31(), rand.Int63(), &pk, &pv, &ptrpk},
 		})
 	}
 	return a
@@ -118,58 +316,41 @@ func benchUnmarshal(b *testing.B, s Serializer) {
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
-		n := rand.Intn(len(ser))
-		o := &A{}
-		err := s.Unmarshal(ser[n], o)
-		if err != nil {
-			b.Fatalf("unmarshal error %s for %#x / %q", err, ser[n], ser[n])
-		}
-		// Validate unmarshalled data.
-		if validate != "" {
-			i := data[n]
-			correct := o.Name == i.Name && o.Phone == i.Phone && o.Siblings == i.Siblings && o.Spouse == i.Spouse && o.Money == i.Money && o.BirthDay.Equal(i.BirthDay) && reflect.DeepEqual(o.Map, i.Map) && reflect.DeepEqual(o.MapPk, i.MapPk) && reflect.DeepEqual(o.MapSk, i.MapSk) && reflect.DeepEqual(o.MapI, i.MapI) && reflect.DeepEqual(o.MapPtr, i.MapPtr) //&& cmpTags(o.Tags, i.Tags) && cmpAliases(o.Aliases, i.Aliases)
-			if !correct {
-				b.Fatalf("unmarshaled object differed:\n%v\n%v", i, o)
+		for n := 0; n < len(ser); n++ {
+			o := &A{}
+			err := s.Unmarshal(ser[n], o)
+			if err != nil {
+				b.Fatalf("unmarshal error %s for %#x / %q", err, ser[n], ser[n])
+			}
+			// Validate unmarshalled data.
+			if validate != "" {
+				i := data[n]
+				correct := o.Name == i.Name &&
+					o.Phone == i.Phone &&
+					o.Siblings == i.Siblings &&
+					o.Spouse == i.Spouse &&
+					o.Money == i.Money &&
+					o.BirthDay.Equal(i.BirthDay) &&
+					reflect.DeepEqual(o.Map, i.Map) &&
+					// reflect.DeepEqual(o.MapPk, i.MapPk) &&
+					reflect.DeepEqual(o.MapSk, i.MapSk) &&
+					// reflect.DeepEqual(o.MapI, i.MapI) &&
+					// reflect.DeepEqual(o.MapPtr, i.MapPtr) &&
+					reflect.DeepEqual(o.MapPtrPk, i.MapPtrPk) &&
+					reflect.DeepEqual(o.Slice, i.Slice) &&
+					reflect.DeepEqual(o.SliceS, i.SliceS) &&
+					reflect.DeepEqual(o.SliceI, i.SliceI) &&
+					reflect.DeepEqual(o.SlicePtr, i.SlicePtr) &&
+					reflect.DeepEqual(o.Array, i.Array) &&
+					reflect.DeepEqual(o.ArrayS, i.ArrayS) &&
+					reflect.DeepEqual(o.ArrayI, i.ArrayI) &&
+					reflect.DeepEqual(o.ArrayPtr, i.ArrayPtr) //&& cmpTags(o.Tags, i.Tags) && cmpAliases(o.Aliases, i.Aliases)
+				if !correct {
+					fmt.Println("Pass")
+					b.Fatalf("unmarshaled object differed:\n%d\n%v\n%v", n, i, o)
+				}
 			}
 		}
-	}
-}
-
-func TestMessage(t *testing.T) {
-	println(`
-A test suite for benchmarking various Go serialization methods.
-
-See README.md for details on running the benchmarks.
-`)
-
-}
-
-// github.com/niubaoshu/gotiny
-
-type GotinySerializer struct {
-	enc *gotiny.Encoder
-	dec *gotiny.Decoder
-}
-
-func (g GotinySerializer) Marshal(o interface{}) ([]byte, error) {
-	return g.enc.Encode(o), nil
-}
-
-func (g GotinySerializer) Unmarshal(d []byte, o interface{}) error {
-	g.dec.Decode(d, o)
-	return nil
-}
-
-func NewGotinySerializer(o interface{}) Serializer {
-	var ot reflect.Type
-	if rt := reflect.TypeOf(o); rt.Kind() == reflect.Ptr {
-		ot = rt.Elem()
-	} else {
-		ot = rt
-	}
-	return GotinySerializer{
-		enc: gotiny.NewEncoderWithType(ot),
-		dec: gotiny.NewDecoderWithType(ot),
 	}
 }
 
@@ -187,6 +368,90 @@ func Benchmark_GotinyPtr_Marshal(b *testing.B) {
 
 func Benchmark_GotinyPtr_Unmarshal(b *testing.B) {
 	benchUnmarshal(b, NewGotinySerializer(new(A)))
+}
+
+type JsonSerializer struct{}
+
+func (j JsonSerializer) Marshal(o interface{}) ([]byte, error) {
+	return json.Marshal(o)
+}
+
+func (j JsonSerializer) Unmarshal(d []byte, o interface{}) error {
+	return json.Unmarshal(d, o)
+}
+
+type JsonIterSerializer struct{}
+
+func (j JsonIterSerializer) Marshal(o interface{}) ([]byte, error) {
+	return jsoniterFast.Marshal(o)
+}
+
+func (j JsonIterSerializer) Unmarshal(d []byte, o interface{}) error {
+	return jsoniterFast.Unmarshal(d, o)
+}
+
+// github.com/niubaoshu/gotiny
+
+type GotinySerializer struct {
+	enc *gotiny.Encoder
+	dec *gotiny.Decoder
+}
+
+func (g *GotinySerializer) Marshal(o interface{}) ([]byte, error) {
+	return g.enc.Encode(o), nil
+}
+
+func (g *GotinySerializer) Unmarshal(d []byte, o interface{}) error {
+	g.dec.Decode(d, o)
+	return nil
+}
+
+func NewGotinySerializer(o interface{}) Serializer {
+	var ot reflect.Type
+	if rt := reflect.TypeOf(o); rt.Kind() == reflect.Ptr {
+		ot = rt.Elem()
+	} else {
+		ot = rt
+	}
+	return &GotinySerializer{
+		enc: gotiny.NewEncoderWithType(ot),
+		dec: gotiny.NewDecoderWithType(ot),
+	}
+}
+
+type GobSerializer struct {
+	b   bytes.Buffer
+	enc *gob.Encoder
+	dec *gob.Decoder
+}
+
+func (g *GobSerializer) Marshal(o interface{}) ([]byte, error) {
+	g.b.Reset()
+	err := g.enc.Encode(o)
+	return g.b.Bytes(), err
+}
+
+func (g *GobSerializer) Unmarshal(d []byte, o interface{}) error {
+	g.b.Reset()
+	g.b.Write(d)
+	err := g.dec.Decode(o)
+	return err
+}
+
+func NewGobSerializer() Serializer {
+	s := &GobSerializer{}
+	s.enc = gob.NewEncoder(&s.b)
+	s.dec = gob.NewDecoder(&s.b)
+	err := s.enc.Encode(A{})
+	if err != nil {
+		panic(err)
+	}
+	var a A
+	err = s.dec.Decode(&a)
+	if err != nil {
+		panic(err)
+	}
+	return s
 }
 
 /*
@@ -380,41 +645,6 @@ func Benchmark_Bson_Unmarshal(b *testing.B) {
 }
 
 // encoding/gob
-
-type GobSerializer struct {
-	b   bytes.Buffer
-	enc *gob.Encoder
-	dec *gob.Decoder
-}
-
-func (g *GobSerializer) Marshal(o interface{}) ([]byte, error) {
-	g.b.Reset()
-	err := g.enc.Encode(o)
-	return g.b.Bytes(), err
-}
-
-func (g *GobSerializer) Unmarshal(d []byte, o interface{}) error {
-	g.b.Reset()
-	g.b.Write(d)
-	err := g.dec.Decode(o)
-	return err
-}
-
-func NewGobSerializer() *GobSerializer {
-	s := &GobSerializer{}
-	s.enc = gob.NewEncoder(&s.b)
-	s.dec = gob.NewDecoder(&s.b)
-	err := s.enc.Encode(A{})
-	if err != nil {
-		panic(err)
-	}
-	var a A
-	err = s.dec.Decode(&a)
-	if err != nil {
-		panic(err)
-	}
-	return s
-}
 
 func Benchmark_Gob_Marshal(b *testing.B) {
 	s := NewGobSerializer()
